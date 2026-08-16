@@ -1,0 +1,169 @@
+name: inno
+
+services:
+  api-gateway:
+    image: inno-api-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      SERVER_PORT: 8080
+      AUTH_JWKS_URI: http://auth-service:8080/.well-known/jwks.json
+      AUTH_SERVICE_URI: http://auth-service:8080
+      USER_SERVICE_URI: http://user-service:8080
+      ORDER_SERVICE_URI: http://order-service:8080
+    depends_on:
+      - auth-service
+      - user-service
+      - order-service
+    networks:
+      - inno-net
+
+# AUTHENTIFICATION
+  auth-service:
+    image: inno-auth-service
+    volumes:
+      - ./keys:/run/keys:ro
+    environment:
+      SERVER_PORT: 8080
+      POSTGRES_DB: ${AUTH_POSTGRES_DB}
+      POSTGRES_USER: ${AUTH_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${AUTH_POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://auth-postgres:5432/${AUTH_POSTGRES_DB}
+      JWT_PRIVATE_KEY_LOCATION: file:/run/keys/private.pem
+      JWT_PUBLIC_KEY_LOCATION: file:/run/keys/public.pem
+      JWT_KEY_ID: ${JWT_KEY_ID}
+      USER_SERVICE_URL: http://user-service:8080
+    depends_on:
+        auth-postgres:
+          condition: service_healthy
+    networks:
+      - inno-net
+      - auth-internal
+
+  auth-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${AUTH_POSTGRES_DB}
+      POSTGRES_USER: ${AUTH_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${AUTH_POSTGRES_PASSWORD}
+    volumes:
+      - auth_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${AUTH_POSTGRES_USER} -d ${AUTH_POSTGRES_DB}" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - auth-internal
+
+# USER
+  user-service:
+    image: inno-user-service
+    environment:
+      SERVER_PORT: 8080
+      POSTGRES_DB: ${USER_POSTGRES_DB}
+      POSTGRES_USER: ${USER_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${USER_POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://user-postgres:5432/${USER_POSTGRES_DB}
+      SPRING_DATA_REDIS_HOST: user-redis
+      SPRING_DATA_REDIS_PORT: 6379
+      AUTH_JWKS_URI: http://auth-service:8080/.well-known/jwks.json
+    depends_on:
+      user-postgres:
+        condition: service_healthy
+      user-redis:
+        condition: service_healthy
+    networks:
+      - inno-net
+      - user-internal
+
+  user-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${USER_POSTGRES_DB}
+      POSTGRES_USER: ${USER_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${USER_POSTGRES_PASSWORD}
+    volumes:
+      - user_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${USER_POSTGRES_USER} -d ${USER_POSTGRES_DB}" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - user-internal
+
+  user-redis:
+    image: redis:7
+    volumes:
+      - user_redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - user-internal
+
+# ORDER
+  order-service:
+    image: inno-order-service
+    environment:
+      SERVER_PORT: 8080
+      POSTGRES_DB: ${ORDER_POSTGRES_DB}
+      POSTGRES_USER: ${ORDER_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${ORDER_POSTGRES_PASSWORD}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://order-postgres:5432/${ORDER_POSTGRES_DB}
+      SPRING_DATA_REDIS_HOST: order-redis
+      SPRING_DATA_REDIS_PORT: 6379
+      AUTH_JWKS_URI: http://auth-service:8080/.well-known/jwks.json
+      USER_SERVICE_URL: http://user-service:8080
+    depends_on:
+      order-postgres:
+        condition: service_healthy
+      order-redis:
+        condition: service_healthy
+    networks:
+      - inno-net
+      - order-internal
+
+  order-postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${ORDER_POSTGRES_DB}
+      POSTGRES_USER: ${ORDER_POSTGRES_USER}
+      POSTGRES_PASSWORD: ${ORDER_POSTGRES_PASSWORD}
+    volumes:
+      - order_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${ORDER_POSTGRES_USER} -d ${ORDER_POSTGRES_DB}" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - order-internal
+
+  order-redis:
+    image: redis:7
+    volumes:
+      - order_redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - order-internal
+
+volumes:
+  auth_postgres_data:
+  user_postgres_data:
+  user_redis_data:
+  order_postgres_data:
+  order_redis_data:
+
+networks:
+  inno-net:
+  auth-internal:
+  user-internal:
+  order-internal:
